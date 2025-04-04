@@ -57,9 +57,9 @@ function App() {
         authorization: window.localStorage.getItem('token')
       */
       const response = await fetch(`/api/users/${auth.id}/userSkills`, {
-        // headers: {
-        //   authorization: window.localStorage.getItem("token"),
-        // },
+        headers: {
+          authorization: window.localStorage.getItem("token"),
+        },
       });
       const json = await response.json();
       if (response.ok) {
@@ -111,7 +111,7 @@ function App() {
       body: JSON.stringify({ skill_id }),
       headers: {
         "Content-Type": "application/json",
-        // authorization: window.localStorage.getItem('token')
+        authorization: window.localStorage.getItem('token')
       },
     });
     const json = await response.json();
@@ -125,9 +125,9 @@ function App() {
   const removeUserSkill = async (id) => {
     const response = await fetch(`/api/users/${auth.id}/userSkills/${id}`, {
       method: "DELETE",
-      // headers: {
-      //   authorization: window.localStorage.getItem("token"),
-      // },
+      headers: {
+        authorization: window.localStorage.getItem("token"),
+      },
     });
     setUserSkills(userSkills.filter((userSkill) => userSkill.id !== id));
   };

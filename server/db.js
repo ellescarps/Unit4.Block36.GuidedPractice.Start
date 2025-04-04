@@ -1,16 +1,15 @@
 require("dotenv").config();
-
 const pg = require("pg");
-const client = new pg.Client(process.env.DATABASE_URL);
-/* TODO - create .env file with database connection
-  "postgres://user:password@localhost/acme_talent_agency_db"
-*/
 const uuid = require("uuid");
 const bcrypt = require("bcrypt");
-// TODO - create secret - jsonwebtoken library is already installed
+const jwt = require("jsonwebtoken");
 
+const client = new pg.Client(process.env.DATABASE_URL);
+const JWT_SECRET = process.env.JWT; // Ensure this is set in your .env file
+
+// Function to create tables
 const createTables = async () => {
-  const SQL = /* sql */ `
+  const SQL = `
     DROP TABLE IF EXISTS user_skills;
     DROP TABLE IF EXISTS users;
     DROP TABLE IF EXISTS skills;
@@ -36,100 +35,108 @@ const createTables = async () => {
   await client.query(SQL);
 };
 
+// Function to create a user with hashed password
 const createUser = async ({ username, password }) => {
-  const SQL = /* sql */ `
-    INSERT INTO users(id, username, password) VALUES($1, $2, $3) RETURNING *
+  const SQL = `
+    INSERT INTO users(id, username, password) VALUES($1, $2, $3) RETURNING id, username
   `;
-  const response = await client.query(SQL, [
-    uuid.v4(),
-    username,
-    await bcrypt.hash(password, 5),
-  ]);
+  const hashedPassword = await bcrypt.hash(password, 10); // More secure hashing rounds
+  const response = await client.query(SQL, [uuid.v4(), username, hashedPassword]);
   return response.rows[0];
 };
 
+// Function to create a skill
 const createSkill = async ({ name }) => {
-  const SQL = /* sql */ `
-    INSERT INTO skills(id, name) VALUES ($1, $2) RETURNING * 
+  const SQL = `
+    INSERT INTO skills(id, name) VALUES ($1, $2) RETURNING *
   `;
   const response = await client.query(SQL, [uuid.v4(), name]);
   return response.rows[0];
 };
 
+// Function to authenticate user and generate a JWT
 const authenticate = async ({ username, password }) => {
-  // TODO - add password in SELECT
-  const SQL = /* sql */ `
-    SELECT id
-    FROM users
-    WHERE username = $1
+  const SQL = `
+    SELECT id, password FROM users WHERE username = $1
   `;
   const response = await client.query(SQL, [username]);
-  // TODO - check for correct password with bcrypt.compare
-  if (!response.rows.length) {
-    const error = Error("not authorized");
-    error.status = 401;
-    throw error;
-  }
-  // TODO - create token with jsonwebtoken and sign it with secret
 
-  return { token: response.rows[0].id };
+  if (!response.rows.length) {
+    throw new Error("User not found");
+  }
+
+  const user = response.rows[0];
+
+  const isValidPassword = await bcrypt.compare(password, user.password);
+  if (!isValidPassword) {
+    throw new Error("Invalid password");
+  }
+
+  // Generate JWT with expiration
+  const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "1h" });
+
+  return { token };
 };
 
+// Function to associate a user with a skill
 const createUserSkill = async ({ user_id, skill_id }) => {
-  const SQL = /* sql */ `
-    INSERT INTO user_skills(id, user_id, skill_id) VALUES ($1, $2, $3) RETURNING * 
+  const SQL = `
+    INSERT INTO user_skills(id, user_id, skill_id) VALUES ($1, $2, $3) RETURNING *
   `;
   const response = await client.query(SQL, [uuid.v4(), user_id, skill_id]);
   return response.rows[0];
 };
 
+// Fetch all users
 const fetchUsers = async () => {
   const SQL = `SELECT id, username FROM users`;
   const response = await client.query(SQL);
   return response.rows;
 };
 
+// Fetch all skills
 const fetchSkills = async () => {
   const SQL = `SELECT * FROM skills`;
   const response = await client.query(SQL);
   return response.rows;
 };
 
+// Fetch skills for a specific user
 const fetchUserSkills = async (user_id) => {
-  const SQL = /* sql */ `
-    SELECT *
-    FROM user_skills
-    WHERE user_id = $1
+  const SQL = `
+    SELECT * FROM user_skills WHERE user_id = $1
   `;
   const response = await client.query(SQL, [user_id]);
   return response.rows;
 };
 
+// Delete a user skill entry
 const deleteUserSkill = async ({ user_id, id }) => {
-  const SQL = /* sql */ `
-    DELETE
-    FROM user_skills
-    WHERE user_id = $1 AND id = $2
+  const SQL = `
+    DELETE FROM user_skills WHERE user_id = $1 AND id = $2
   `;
   await client.query(SQL, [user_id, id]);
 };
 
+// Function to validate JWT and fetch user by token
 const findUserByToken = async (token) => {
-  // TODO - validate the passed token and use the id in the payload to find user
-
-  const SQL = /* sql */ `
-    SELECT id, username
-    FROM users
-    WHERE id = $1
-  `;
-
-  // TODO - use id instead of token to find user
-  const response = await client.query(SQL, [token]);
-  if (!response.rows.length) {
-    const error = Error("not authorized");
-    error.status = 401;
-    throw error;
+  let id;
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    id = payload.id;
+  } catch (ex) {
+    throw new Error("Invalid or expired token");
   }
+
+  const SQL = `
+    SELECT id, username FROM users WHERE id = $1
+  `;
+  const response = await client.query(SQL, [id]);
+
+  if (!response.rows.length) {
+    throw new Error("User not found");
+  }
+
   return response.rows[0];
 };
 
